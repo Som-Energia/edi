@@ -35,7 +35,8 @@ class AccountInvoiceImport(models.TransientModel):
     currency_id = fields.Many2one(
         'res.currency', readonly=True)
     invoice_type = fields.Selection([
-        ('in_invoice', 'Invoice'),
+        ('in_invoice', 'Supplier Invoice'),
+        ('out_invoice', 'Customer Invoice'),
         ('in_refund', 'Refund'),
         ], string="Invoice or Refund", readonly=True)
     amount_untaxed = fields.Float(
@@ -268,9 +269,13 @@ class AccountInvoiceImport(models.TransientModel):
             for line in parsed_inv['lines']:
                 il_vals = static_vals.copy()
                 if config['invoice_line_method'] == 'nline_auto_product':
-                    product = bdio._match_product(
-                        line['product'], parsed_inv['chatter_msg'],
-                        seller=partner)
+                    if 'customer' in self.env.context:
+                        product = bdio._match_product(
+                            line['product'], parsed_inv['chatter_msg'])
+                    else:
+                        product = bdio._match_product(
+                            line['product'], parsed_inv['chatter_msg'],
+                            seller=partner)
                     il_vals = {'product_id': product.id, 'invoice_id': vals}
                     il_vals = ailo.play_onchanges(il_vals, ['product_id'])
                     il_vals.pop('invoice_id')
@@ -535,9 +540,15 @@ class AccountInvoiceImport(models.TransientModel):
             self = self.with_context(force_company=company_id)
         if not self.partner_id:
             try:
-                partner = bdio._match_partner(
-                    parsed_inv["partner"], parsed_inv["chatter_msg"]
-                )
+                if 'customer' in self.env.context:
+                    partner = bdio._match_partner(
+                        parsed_inv["partner"], parsed_inv["chatter_msg"],
+                        partner_type='customer'
+                    )
+                else:
+                    partner = bdio._match_partner(
+                        parsed_inv["partner"], parsed_inv["chatter_msg"]
+                    )
             except UserError as e:
                 action = self._hook_no_partner_found(parsed_inv["partner"])
                 if action:
@@ -629,11 +640,19 @@ class AccountInvoiceImport(models.TransientModel):
         invoice = self.create_invoice(parsed_inv, import_config)
         invoice.message_post(body=_(
             "This invoice has been created automatically via file import"))
-        action = iaao.for_xml_id('account', 'action_vendor_bill_template')
-        action.update({
-            'view_mode': 'form,tree,calendar,graph',
-            'views': False,
-            'res_id': invoice.id,
+        if invoice.type == 'in_invoice':
+            action = iaao.for_xml_id('account', 'action_vendor_bill_template')
+            action.update({
+                'view_mode': 'form,tree,calendar,graph',
+                'views': False,
+                'res_id': invoice.id,
+            })
+        else:
+            action = iaao.for_xml_id('account', 'action_invoice_tree1')
+            action.update({
+                'view_mode': 'form,tree,calendar,graph',
+                'views': [(self.env.ref('account.invoice_form').id, 'form')],
+                'res_id': invoice.id,
             })
         return action
 
