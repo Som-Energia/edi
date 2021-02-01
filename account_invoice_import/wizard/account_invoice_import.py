@@ -269,13 +269,13 @@ class AccountInvoiceImport(models.TransientModel):
             for line in parsed_inv['lines']:
                 il_vals = static_vals.copy()
                 if config['invoice_line_method'] == 'nline_auto_product':
-                    if 'customer' in self.env.context:
-                        product = bdio._match_product(
-                            line['product'], parsed_inv['chatter_msg'])
-                    else:
-                        product = bdio._match_product(
-                            line['product'], parsed_inv['chatter_msg'],
-                            seller=partner)
+                    if parsed_inv['type'] in ('out_invoice', 'out_refund'):
+                        partner_type = 'customer'
+                    else
+                        partner_type = 'supplier'
+                    product = bdio._match_product(
+                        line['product'], parsed_inv['chatter_msg'],
+                        seller=partner_type)
                     il_vals = {'product_id': product.id, 'invoice_id': vals}
                     il_vals = ailo.play_onchanges(il_vals, ['product_id'])
                     il_vals.pop('invoice_id')
@@ -540,15 +540,14 @@ class AccountInvoiceImport(models.TransientModel):
             self = self.with_context(force_company=company_id)
         if not self.partner_id:
             try:
-                if 'customer' in self.env.context:
-                    partner = bdio._match_partner(
-                        parsed_inv["partner"], parsed_inv["chatter_msg"],
-                        partner_type='customer'
-                    )
-                else:
-                    partner = bdio._match_partner(
-                        parsed_inv["partner"], parsed_inv["chatter_msg"]
-                    )
+                if parsed_inv['type'] in ('out_invoice', 'out_refund'):
+                    partner_type = 'customer'
+                else
+                    partner_type = 'supplier'
+                partner = bdio._match_partner(
+                    parsed_inv['partner'], parsed_inv['chatter_msg'],
+                    partner_type=partner_type
+                )
             except UserError as e:
                 action = self._hook_no_partner_found(parsed_inv["partner"])
                 if action:
