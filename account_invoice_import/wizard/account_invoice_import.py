@@ -415,7 +415,9 @@ class AccountInvoiceImport(models.TransientModel):
                     "Did you install the module to support this type "
                     "of file?"))
         elif filetype and filetype[0] == 'application/zip':
-            parsed_inv = self._parse_all_files(file_data)[0]
+            parsed_inv = self._parse_all_files(file_data)
+            parsed_inv = [self.pre_process_parsed_inv(i) for i in parsed_inv]
+            return parsed_inv
         # Fallback on PDF
         else:
             parsed_inv = self.parse_pdf_invoice(file_data)
