@@ -11,6 +11,8 @@ from lxml import etree
 import logging
 from datetime import datetime
 import mimetypes
+from zipfile import ZipFile, BadZipfile
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +414,8 @@ class AccountInvoiceImport(models.TransientModel):
                     "This type of XML invoice is not supported. "
                     "Did you install the module to support this type "
                     "of file?"))
+        elif filetype and filetype[0] == 'application/zip':
+            parsed_inv = self._parse_all_files(file_data)[0]
         # Fallback on PDF
         else:
             parsed_inv = self.parse_pdf_invoice(file_data)
@@ -555,6 +559,7 @@ class AccountInvoiceImport(models.TransientModel):
         (import step AND config step)"""
         self.ensure_one()
         aio = self.env['account.invoice']
+        aiico = self.env['account.invoice.import.config']
         bdio = self.env['business.document.import']
         iaao = self.env['ir.actions.act_window']
         parsed_inv = self.get_parsed_invoice()
@@ -562,79 +567,70 @@ class AccountInvoiceImport(models.TransientModel):
             self.env.user.company_id.id
         company = self._get_child_company(
             company_id, parsed_inv
-        if parsed_inv['type'] in ('out_invoice', 'out_refund'):
-            partner_type = 'customer'
+        if type(parsed_inv) is list:
+            many_invoices = True
         else:
-            partner_type = 'supplier'
-        partner = bdio._match_partner(
-            parsed_inv['partner'], parsed_inv['chatter_msg'],
-            partner_type=partner_type
-        )
-        if company:
-            company_id = company.id
-            self = self.with_context(force_company=company_id)
-        if not self.partner_id:
-            try:
-                if parsed_inv['type'] in ('out_invoice', 'out_refund'):
-                    partner_type = 'customer'
-                else
-                    partner_type = 'supplier'
-                partner = bdio._match_partner(
-                    parsed_inv['partner'], parsed_inv['chatter_msg'],
-                    partner_type=partner_type
-                )
-            except UserError as e:
-                action = self._hook_no_partner_found(parsed_inv["partner"])
-                if action:
-                    return action
-                raise e
-        else:
-            partner = self.partner_id
-        partner = partner.commercial_partner_id
-        currency = bdio._match_currency(
-            parsed_inv.get('currency'), parsed_inv['chatter_msg'])
-        parsed_inv['partner']['recordset'] = partner
-        parsed_inv['currency']['recordset'] = currency
+            many_invoices = False
+            parsed_inv = [parsed_inv]
+        for parsed_inv_elem in parsed_inv:
+            if parsed_inv_elem['type'] in ('out_invoice', 'out_refund'):
+                partner_type = 'customer'
+            else:
+                partner_type = 'supplier'
+            partner = bdio._match_partner(
+                parsed_inv_elem['partner'], parsed_inv_elem['chatter_msg'],
+                partner_type=partner_type
+            )
+            partner = partner.commercial_partner_id
+            currency = bdio._match_currency(
+                parsed_inv_elem.get('currency'), parsed_inv_elem['chatter_msg'])
+            parsed_inv_elem['partner']['recordset'] = partner
+            parsed_inv_elem['currency']['recordset'] = currency
+            parsed_inv_elem['partner_type'] = partner_type
         wiz_vals = {
             'partner_id': partner.id,
-            'invoice_type': parsed_inv['type'],
+            'invoice_type': parsed_inv_elem['type'],
             'currency_id': currency.id,
-            'amount_untaxed': parsed_inv['amount_untaxed'],
-            'amount_total': parsed_inv['amount_total'],
+            'amount_untaxed': parsed_inv_elem['amount_untaxed'],
+            'amount_total': parsed_inv_elem['amount_total'],
             }
-
-        existing_inv = self.invoice_already_exists(partner, parsed_inv)
-        if existing_inv:
-            raise UserError(_(
-                "This invoice already exists in Odoo. It's "
-                "Supplier Invoice Number is '%s' and it's Odoo number "
-                "is '%s'")
-                % (parsed_inv.get('invoice_number'), existing_inv.number))
-
-        if self.import_config_id:  # button called from 'config' step
-            wiz_vals['import_config_id'] = self.import_config_id.id
-            import_config = self.import_config_id.convert_to_import_config()
-        else:  # button called from 'import' step
-<<<<<<< HEAD
-            import_configs = self._search_import_config(partner, company_id)
-=======
-            import_configs = aiico.search([
-                ('partner_id', '=', partner.id),
-                ('company_id', '=', company_id),
-                ('type', '=', partner_type)
-            ])
->>>>>>> Import customer bills with config
-            if not import_configs:
+        for parsed_inv_elem in parsed_inv:
+            existing_inv = self.invoice_already_exists(
+                parsed_inv_elem['partner']['recordset'], parsed_inv_elem
+            )
+            if existing_inv:
                 raise UserError(_(
-                    "Missing Invoice Import Configuration on partner '%s'.")
-                    % partner.display_name)
-            elif len(import_configs) == 1:
-                wiz_vals['import_config_id'] = import_configs.id
-                import_config = import_configs.convert_to_import_config()
-            else:
-                logger.info(
-                    'There are %d invoice import configs for partner %s',
-                    len(import_configs), partner.display_name)
+                    "This invoice already exists in Odoo. It's "
+                    "Invoice Number is '%s' and it's Odoo number "
+                    "is '%s'")
+                    % (parsed_inv_elem.get('invoice_number'), existing_inv.number))
+        import_config_dict = {}
+        for parsed_inv_elem in parsed_inv:
+            partner_id = parsed_inv_elem['partner']['recordset'].id
+            partner_type = parsed_inv_elem['partner_type']
+            if self.import_config_id:  # button called from 'config' step
+                if many_invoices:
+                    raise UserError(_(
+                        "ZIP mode not supported calling from config step"
+                    ))
+                wiz_vals['import_config_id'] = self.import_config_id.id
+                import_config = self.import_config_id.convert_to_import_config()
+                import_config_dict[partner_id] = import_config
+            else:  # button called from 'import' step
+                import_configs = self._search_import_config(partner, company_id)
+                if not import_configs:
+                    raise UserError(_(
+                        "Missing Invoice Import Configuration on partner '%s'.")
+                        % partner.display_name)
+                elif len(import_configs) == 1:
+                    wiz_vals['import_config_id'] = import_configs.id
+                    import_config_dict[partner_id] = (
+                        import_configs.convert_to_import_config()
+                    )
+                else:
+                    logger.info(
+                        'There are %d invoice import configs for partner %s',
+                        len(import_configs), partner.display_name)
 
         if not wiz_vals.get('import_config_id'):
             wiz_vals['state'] = 'config'
@@ -643,23 +639,30 @@ class AccountInvoiceImport(models.TransientModel):
                 'account_invoice_import_action')
             action['res_id'] = self.id
         else:
-            draft_same_supplier_invs = aio.search([
-                ('commercial_partner_id', '=', partner.id),
-                ('type', '=', parsed_inv['type']),
-                ('state', '=', 'draft'),
+            for parsed_inv_elem in parsed_inv:
+                partner = parsed_inv_elem['partner']['recordset']
+                draft_same_supplier_invs = aio.search([
+                    ('commercial_partner_id', '=', partner.id),
+                    ('type', '=', parsed_inv_elem['type']),
+                    ('state', '=', 'draft'),
                 ])
-            logger.debug(
-                'draft_same_supplier_invs=%s', draft_same_supplier_invs)
-            if draft_same_supplier_invs:
-                wiz_vals['state'] = 'update'
-                if len(draft_same_supplier_invs) == 1:
-                    wiz_vals['invoice_id'] = draft_same_supplier_invs[0].id
-                action = iaao.for_xml_id(
-                    'account_invoice_import',
-                    'account_invoice_import_action')
-                action['res_id'] = self.id
+                logger.debug(
+                    'draft_same_supplier_invs=%s', draft_same_supplier_invs)
+                if draft_same_supplier_invs and many_invoices:
+                    raise UserError(_(
+                        "Update invoices not supported with ZIP"
+                    ))
+                elif draft_same_supplier_invs:
+                    wiz_vals['state'] = 'update'
+                    if len(draft_same_supplier_invs) == 1:
+                        wiz_vals['invoice_id'] = draft_same_supplier_invs[0].id
+                    action = iaao.for_xml_id(
+                        'account_invoice_import',
+                        'account_invoice_import_action')
+                    action['res_id'] = self.id
+                    break
             else:
-                action = self.create_invoice_action(parsed_inv, import_config)
+                action = self.create_invoice_action(parsed_inv, import_config_dict)
         self.write(wiz_vals)
         return action
 
@@ -670,32 +673,47 @@ class AccountInvoiceImport(models.TransientModel):
         return self.create_invoice_action()
 
     @api.multi
-    def create_invoice_action(self, parsed_inv=None, import_config=None):
+    def create_invoice_action(self, parsed_inv=None, import_config_dict=None):
         '''parsed_inv is not a required argument'''
         self.ensure_one()
         iaao = self.env['ir.actions.act_window']
         if parsed_inv is None:
             parsed_inv = self.get_parsed_invoice()
-        if import_config is None:
-            assert self.import_config_id
-            import_config = self.import_config_id.convert_to_import_config()
-        invoice = self.create_invoice(parsed_inv, import_config)
-        invoice.message_post(body=_(
-            "This invoice has been created automatically via file import"))
+        invoices = []
+        for parsed_inv_elem in parsed_inv:
+            partner_id = parsed_inv_elem['partner']['recordset'].id
+            if import_config_dict is None:
+                assert len(parsed_inv) == 1
+                assert self.import_config_id
+                import_config_dict = {
+                    partner_id: self.import_config_id.convert_to_import_config()
+                }
+            invoice = self.create_invoice(
+                parsed_inv_elem, import_config_dict[partner_id]
+            )
+            invoice.message_post(body=_(
+                "This invoice has been created automatically via file import"))
+            invoices.append(invoice)
         if invoice.type == 'in_invoice':
             action = iaao.for_xml_id('account', 'action_vendor_bill_template')
-            action.update({
-                'view_mode': 'form,tree,calendar,graph',
-                'views': False,
-                'res_id': invoice.id,
-            })
+            if len(invoices) == 1:
+                action.update({
+                    'view_mode': 'form,tree,calendar,graph',
+                    'views': False,
+                    'res_id': invoice.id,
+                })
+            else:
+                action['domain'] = [('id', 'in', [i.id for i in invoices])]
         else:
             action = iaao.for_xml_id('account', 'action_invoice_tree1')
-            action.update({
-                'view_mode': 'form,tree,calendar,graph',
-                'views': [(self.env.ref('account.invoice_form').id, 'form')],
-                'res_id': invoice.id,
-            })
+            if len(invoices) == 1:
+                action.update({
+                    'view_mode': 'form,tree,calendar,graph',
+                    'views': [(self.env.ref('account.invoice_form').id, 'form')],
+                    'res_id': invoice.id,
+                })
+            else:
+                action['domain'] = [('id', 'in', [i.id for i in invoices])]
         return action
 
     @api.model
@@ -1141,3 +1159,38 @@ class AccountInvoiceImport(models.TransientModel):
                         msg_dict.get('subject')))
         else:
             logger.info('The email has no attachments, skipped.')
+
+    def _parse_all_files(self, data_file):
+        """
+        Parse one or multiple files from zip-file.
+        :param data_file: Decoded raw content of the file
+        :return: List of account invoice dictionaries for further processing.
+        """
+        account_invoice_raw_list = []
+        files = [data_file]
+        try:
+            with ZipFile(BytesIO(data_file), 'r') as archive:
+                files = {
+                    filename: archive.read(filename)
+                    for filename in archive.namelist()
+                    if not filename.endswith('/')
+                }
+        except BadZipfile:
+            pass
+        # Parse the file(s)
+        for filename in files:
+            # The appropriate implementation module(s) returns the payment
+            # returns. We support a list of dictionaries or a simple
+            # dictionary.
+
+            # Actually we don't care wether all the files have the
+            # same format.
+            vals = self.parse_invoice(
+                base64.b64encode(files[filename]),
+                filename
+            )
+            if isinstance(vals, list):
+                account_invoice_raw_list += vals
+            else:
+                account_invoice_raw_list.append(vals)
+        return account_invoice_raw_list

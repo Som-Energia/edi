@@ -124,6 +124,31 @@ class TestInvoiceImport(TransactionCase):
             'amount_untaxed': 100.0,
             'amount_total': 101.0
         }
+        self.parsed_inv_out_2 = {
+            'type': 'out_invoice',
+            'date_invoice': '2017-08-17',
+            'partner': {
+                'name': 'Azure Interior',
+            },
+            'lines': [{
+                'product': {'code': 'AII-TEST-PRODUCT'},
+                'name': 'Super product',
+                'qty': 2,
+                'price_unit': 50,
+                'date_start': '2017-08-01',
+                'date_end': '2017-08-31',
+                'taxes': [{  # only needed for method 'nline_no_product'
+                    'amount_type': 'percent',
+                    'amount': 1.0,
+                    'unece_type_code': 'VAT',
+                    'unece_categ_code': 'S',
+                }],
+            }],
+            'chatter_msg': [],
+            'currency': {},
+            'amount_untaxed': 100.0,
+            'amount_total': 101.0
+        }
         self.parsed_inv_in = {
             'type': 'in_invoice',
             'invoice_number': 'INV-2017-9876',
@@ -133,6 +158,35 @@ class TestInvoiceImport(TransactionCase):
             'date_end': '2017-08-31',
             'partner': {
                 'name': 'Wood Corner',
+            },
+            'description': 'New hi-tech gadget',
+            'lines': [{
+                'product': {'code': 'AII-TEST-PRODUCT'},
+                'name': 'Super test product',
+                'qty': 2,
+                'price_unit': 50,
+                'taxes': [{
+                    'amount_type': 'percent',
+                    'amount': 1.0,
+                    'unece_type_code': 'VAT',
+                    'unece_categ_code': 'S',
+                }],
+            }],
+            'chatter_msg': [],
+            'currency': {},
+            'amount_untaxed': 100.0,
+            'amount_total': 101.0
+        }
+
+        self.parsed_inv_in_2 = {
+            'type': 'in_invoice',
+            'invoice_number': 'INV-2017-9877',
+            'date_invoice': '2017-08-17',
+            'date_due': '2017-08-31',
+            'date_start': '2017-08-01',
+            'date_end': '2017-08-31',
+            'partner': {
+                'name': 'Azure Interior',
             },
             'description': 'New hi-tech gadget',
             'lines': [{
@@ -323,3 +377,231 @@ class TestInvoiceImport(TransactionCase):
                     parsed_inv, import_config)
                 inv.amount_total, 101, precision_rounding=prec))
             inv.unlink()
+
+    def test_import_out_invoice_list(self):
+        partner = self.env['res.partner'].search([
+            ('name', '=', 'Wood Corner')
+        ])
+        partner_2 = self.env['res.partner'].search([
+            ('name', '=', 'Azure Interior')
+        ])
+        partner.customer = True
+        all_import_config_create = [
+            [{
+                'name': 'test', 'partner_id': partner.id,
+                'account_id': self.all_import_config_sale[0]['account'].id,
+                'tax_ids': [(6, 0, [self.sale_tax.id])],
+                'invoice_line_method': (
+                    self.all_import_config_sale[0]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }, {
+                'name': 'test_2', 'partner_id': partner_2.id,
+                'account_id': self.all_import_config_sale[0]['account'].id,
+                'tax_ids': [(6, 0, [self.sale_tax.id])],
+                'invoice_line_method': (
+                    self.all_import_config_sale[0]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }],
+            [{
+                'name': 'test1', 'partner_id': partner.id,
+                'static_product_id': self.all_import_config_sale[1]['product'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[1]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }, {
+                'name': 'test1_2', 'partner_id': partner_2.id,
+                'static_product_id': self.all_import_config_sale[1]['product'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[1]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }],
+            [{
+                'name': 'test2', 'partner_id': partner.id,
+                'account_id': self.all_import_config_sale[2]['account'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[2]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }, {
+                'name': 'test2_2', 'partner_id': partner_2.id,
+                'account_id': self.all_import_config_sale[2]['account'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[2]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }],
+            [{
+                'name': 'test3', 'partner_id': partner.id,
+                'static_product_id': self.all_import_config_sale[3]['product'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[3]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }, {
+                'name': 'test3_2', 'partner_id': partner_2.id,
+                'static_product_id': self.all_import_config_sale[3]['product'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[3]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }],
+            [{
+                'name': 'test4', 'partner_id': partner.id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[4]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }, {
+                'name': 'test4_2', 'partner_id': partner_2.id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[4]['invoice_line_method']
+                ),
+                'type': 'customer',
+            }]
+        ]
+        for import_config_dict_list in all_import_config_create:
+            configs = []
+            for import_config_dict in import_config_dict_list:
+                configs.append(self.env['account.invoice.import.config'].create(
+                    import_config_dict
+                ))
+            wiz = self.env['account.invoice.import'].create({
+                'invoice_filename': 'test.xml',
+                'invoice_file': b'0000'
+            })
+            wiz.parse_invoice = Mock(
+                return_value=[self.parsed_inv_out, self.parsed_inv_out_2]
+            )
+            action = wiz.import_invoice()
+            for inv_id in action['domain'][0][2]:
+                inv = self.env['account.invoice'].browse(inv_id)
+                prec = inv.currency_id.rounding
+                self.assertFalse(float_compare(
+                    inv.amount_untaxed, 100, precision_rounding=prec))
+                self.assertFalse(float_compare(
+                    inv.amount_total, 101, precision_rounding=prec))
+                inv.unlink()
+            for aiic in configs:
+                aiic.unlink()
+
+    def test_import_in_invoice_list(self):
+        partner = self.env['res.partner'].search([
+            ('name', '=', 'Wood Corner')
+        ])
+        partner_2 = self.env['res.partner'].search([
+            ('name', '=', 'Azure Interior')
+        ])
+        partner.supplier = True
+        partner.customer = False
+        partner_2.supplier = True
+        partner_2.customer = False
+        self.env['account.invoice'].search([
+            ('partner_id', 'in', [partner.id, partner_2.id]),
+            ('state', '=', 'draft'),
+            ('type', '=', 'in_invoice')
+        ]).unlink()
+        all_import_config_create = [
+            [{
+                'name': 'test', 'partner_id': partner.id,
+                'account_id': self.all_import_config_sale[0]['account'].id,
+                'tax_ids': [(6, 0, [self.sale_tax.id])],
+                'invoice_line_method': (
+                    self.all_import_config_sale[0]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }, {
+                'name': 'test_2', 'partner_id': partner_2.id,
+                'account_id': self.all_import_config_sale[0]['account'].id,
+                'tax_ids': [(6, 0, [self.sale_tax.id])],
+                'invoice_line_method': (
+                    self.all_import_config_sale[0]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }],
+            [{
+                'name': 'test1', 'partner_id': partner.id,
+                'static_product_id': self.all_import_config_sale[1]['product'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[1]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }, {
+                'name': 'test1_2', 'partner_id': partner_2.id,
+                'static_product_id': self.all_import_config_sale[1]['product'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[1]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }],
+            [{
+                'name': 'test2', 'partner_id': partner.id,
+                'account_id': self.all_import_config_sale[2]['account'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[2]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }, {
+                'name': 'test2_2', 'partner_id': partner_2.id,
+                'account_id': self.all_import_config_sale[2]['account'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[2]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }],
+            [{
+                'name': 'test3', 'partner_id': partner.id,
+                'static_product_id': self.all_import_config_sale[3]['product'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[3]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }, {
+                'name': 'test3_2', 'partner_id': partner_2.id,
+                'static_product_id': self.all_import_config_sale[3]['product'].id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[3]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }],
+            [{
+                'name': 'test4', 'partner_id': partner.id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[4]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }, {
+                'name': 'test4_2', 'partner_id': partner_2.id,
+                'invoice_line_method': (
+                    self.all_import_config_sale[4]['invoice_line_method']
+                ),
+                'type': 'supplier',
+            }]
+        ]
+        for import_config_dict_list in all_import_config_create:
+            configs = []
+            for import_config_dict in import_config_dict_list:
+                configs.append(self.env['account.invoice.import.config'].create(
+                    import_config_dict
+                ))
+            wiz = self.env['account.invoice.import'].create({
+                'invoice_filename': 'test.xml',
+                'invoice_file': b'0000'
+            })
+            wiz.parse_invoice = Mock(
+                return_value=[self.parsed_inv_in, self.parsed_inv_in_2]
+            )
+            action = wiz.import_invoice()
+            for inv_id in action['domain'][0][2]:
+                inv = self.env['account.invoice'].browse(inv_id)
+                prec = inv.currency_id.rounding
+                self.assertFalse(float_compare(
+                    inv.amount_untaxed, 100, precision_rounding=prec))
+                self.assertFalse(float_compare(
+                    inv.amount_total, 101, precision_rounding=prec))
+                inv.unlink()
+            for aiic in configs:
+                aiic.unlink()
