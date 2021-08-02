@@ -342,7 +342,8 @@ class TestInvoiceImport(TransactionCase):
             self.assertFalse(float_compare(
                 inv.amount_untaxed, 100, precision_rounding=prec))
             self.assertFalse(float_compare(
-                inv.amount_total, 30.97, precision_rounding=prec))
+                inv.amount_total, 101, precision_rounding=prec))
+            inv.unlink()
 
     def test_import_not_matching_partner(self):
         parsed_inv = {
@@ -375,8 +376,6 @@ class TestInvoiceImport(TransactionCase):
             with self.assertRaises(UserError):
                 self.env['account.invoice.import'].create_invoice(
                     parsed_inv, import_config)
-                inv.amount_total, 101, precision_rounding=prec))
-            inv.unlink()
 
     def test_import_out_invoice_list(self):
         partner = self.env['res.partner'].search([

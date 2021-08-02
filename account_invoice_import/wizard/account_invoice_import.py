@@ -561,20 +561,23 @@ class AccountInvoiceImport(models.TransientModel):
         (import step AND config step)"""
         self.ensure_one()
         aio = self.env['account.invoice']
-        aiico = self.env['account.invoice.import.config']
         bdio = self.env['business.document.import']
         iaao = self.env['ir.actions.act_window']
         parsed_inv = self.get_parsed_invoice()
         company_id = self.env.context.get('force_company') or\
             self.env.user.company_id.id
-        company = self._get_child_company(
-            company_id, parsed_inv
         if type(parsed_inv) is list:
             many_invoices = True
         else:
             many_invoices = False
             parsed_inv = [parsed_inv]
         for parsed_inv_elem in parsed_inv:
+            company = self._get_child_company(
+                company_id, parsed_inv_elem
+            )
+            if company:
+                company_id = company.id
+                self = self.with_context(force_company=company_id)
             if parsed_inv_elem['type'] in ('out_invoice', 'out_refund'):
                 partner_type = 'customer'
             else:
@@ -597,6 +600,12 @@ class AccountInvoiceImport(models.TransientModel):
             'amount_total': parsed_inv_elem['amount_total'],
             }
         for parsed_inv_elem in parsed_inv:
+            company = self._get_child_company(
+                company_id, parsed_inv_elem
+            )
+            if company:
+                company_id = company.id
+                self = self.with_context(force_company=company_id)
             existing_inv = self.invoice_already_exists(
                 parsed_inv_elem['partner']['recordset'], parsed_inv_elem
             )
